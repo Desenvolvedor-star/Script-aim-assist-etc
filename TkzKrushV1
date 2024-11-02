@@ -1,0 +1,191 @@
+local players = game:GetService("Players")
+local localPlayer = players.LocalPlayer
+local camera = workspace.CurrentCamera
+local runService = game:GetService("RunService")
+local userInputService = game:GetService("UserInputService")
+
+local espEnabled = false
+local aimAssistEnabled = false
+local fpsBoostEnabled = false
+
+-- Função para criar e remover ESP
+function toggleESP()
+    espEnabled = not espEnabled
+    if espEnabled then
+        for _, player in pairs(players:GetPlayers()) do
+            if player ~= localPlayer then
+                createESP(player)
+            end
+        end
+    else
+        for _, player in pairs(players:GetPlayers()) do
+            if player ~= localPlayer then
+                removeESP(player)
+            end
+        end
+    end
+end
+
+-- Função para toggle Aim Assist
+function toggleAimAssist()
+    aimAssistEnabled = not aimAssistEnabled
+end
+
+-- Função para Aim Assist
+function aimAssist()
+    if aimAssistEnabled then
+        local closestPlayer
+        local shortestDistance = math.huge
+
+        for _, player in pairs(players:GetPlayers()) do
+            if player ~= localPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local distance = (player.Character.HumanoidRootPart.Position - localPlayer.Character.HumanoidRootPart.Position).magnitude
+                if distance < shortestDistance then
+                    closestPlayer = player
+                    shortestDistance = distance
+                end
+            end
+        end
+
+        if closestPlayer and closestPlayer.Character and closestPlayer.Character:FindFirstChild("Head") then
+            local targetPosition = closestPlayer.Character.Head.Position
+            local direction = (targetPosition - camera.CFrame.Position).unit
+            camera.CFrame = camera.CFrame:Lerp(CFrame.new(camera.CFrame.Position, targetPosition), 0.1) -- ajuste a taxa de suavização conforme necessário
+        end
+    end
+end
+
+-- Função para FPS Boost
+function toggleFPSBoost()
+    fpsBoostEnabled = not fpsBoostEnabled
+    if fpsBoostEnabled then
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    else
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+    end
+end
+
+userInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.E then
+        toggleESP()
+    elseif input.KeyCode == Enum.KeyCode.B then
+        toggleAimAssist()
+    elseif input.KeyCode == Enum.KeyCode.F then
+        toggleFPSBoost()
+    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+        aiming = true
+        runService.RenderStepped:Connect(function()
+            if aiming and aimAssistEnabled then
+                aimAssist()
+            end
+        end)
+    end
+end)
+
+userInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        aiming = false
+    end
+end)
+
+-- Funções ESP (createESP e removeESP)
+function createESP(player)
+    local function applyESPFeatures()
+        local character = player.Character or player.CharacterAdded:Wait()
+        local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+        -- Remove qualquer ESP existente
+        removeESP(player)
+
+        local billboardGui = Instance.new("BillboardGui")
+        billboardGui.Name = "ESP_Billboard"
+        billboardGui.Adornee = humanoidRootPart
+        billboardGui.Size = UDim2.new(0, 200, 0, 50)
+        billboardGui.StudsOffset = Vector3.new(0, 2, 0)
+        billboardGui.AlwaysOnTop = true
+
+        local textLabel = Instance.new("TextLabel", billboardGui)
+        textLabel.Size = UDim2.new(1, 0, 1, 0)
+        textLabel.BackgroundTransparency = 1
+        textLabel.TextColor3 = Color3.fromRGB(255, 0, 0) -- cor vermelha
+        textLabel.TextStrokeTransparency = 0.5
+        textLabel.Text = player.Name
+
+        local healthBar = Instance.new("Frame", billboardGui)
+        healthBar.BackgroundColor3 = Color3.fromRGB(255, 0, 0) -- cor vermelha
+        healthBar.Size = UDim2.new(0, 100, 0, 10)
+        healthBar.Position = UDim2.new(1, 5, 0.5, -5) -- posiciona a barra de vida ao lado do quadrado
+
+        local healthBarBackground = Instance.new("Frame", healthBar)
+        healthBarBackground.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- fundo preto
+        healthBarBackground.Size = UDim2.new(1, 0, 1, 0)
+        healthBarBackground.Position = UDim2.new(0, -1, 0, -1)
+
+        billboardGui.Parent = camera
+
+        local espBox = Instance.new("BoxHandleAdornment")
+        espBox.Name = "ESP_Box"
+        espBox.Size = Vector3.new(4, 6, 0)
+        espBox.Adornee = humanoidRootPart
+        espBox.AlwaysOnTop = true
+        espBox.ZIndex = 10
+        espBox.Transparency = 0.5
+        espBox.Color3 = Color3.fromRGB(255, 0, 0) -- cor vermelha
+        espBox.Parent = camera
+
+        -- Aumenta o tamanho da cabeça do jogador
+        local head = character:WaitForChild("Head")
+        head.Size = Vector3.new(3, 3, 3)
+
+        character.Humanoid.Died:Connect(function()
+            billboardGui:Destroy()
+            espBox:Destroy()
+        end)
+
+        runService.RenderStepped:Connect(function()
+            if character and character:FindFirstChild("HumanoidRootPart") then
+                local distance = (localPlayer.Character.HumanoidRootPart.Position - humanoidRootPart.Position).magnitude
+                textLabel.Text = player.Name .. " | " .. math.floor(distance) .. " studs"
+
+                if distance <= 500 then
+                    billboardGui.Enabled = true
+                    espBox.Visible = true
+
+                    local ray = Ray.new(camera.CFrame.Position, (humanoidRootPart.Position - camera.CFrame.Position).unit * 5000)
+                    local part = workspace:FindPartOnRayWithIgnoreList(ray, {localPlayer.Character, character}, false, true)
+
+                    local humanoid = character:FindFirstChildOfClass("Humanoid")
+                    if humanoid then
+                        local healthPercent = humanoid.Health / humanoid.MaxHealth
+                        healthBar.Size = UDim2.new(healthPercent, 0, 1, 0)
+                    end
+
+                    if part and part:IsDescendantOf(character) then
+                        espBox.Color3 = Color3.fromRGB(0, 255, 0) -- verde se visível
+                        textLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+                    else
+                        espBox.Color3 = Color3.fromRGB(255, 0, 0) -- vermelho se atrás de uma parede
+                        textLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+                    end
+                else
+                    billboardGui.Enabled = false
+                    espBox.Visible = false
+                end
+            end
+        end)
+    end
+
+    player.CharacterAdded:Connect(applyESPFeatures)
+    if player.Character then
+        applyESPFeatures()
+    end
+end
+
+function removeESP(player)
+    for _, child in ipairs(camera:GetChildren()) do
+        if (child:IsA("BillboardGui") and child.Name == "ESP_Billboard" and child.Adornee and child.Adornee.Parent == player.Character) or
+           (child:IsA("BoxHandleAdornment") and child.Name == "ESP_Box" and child.Adornee and child.Adornee.Parent == player.Character) then
+            child:Destroy()
+        end
+    end
+end
